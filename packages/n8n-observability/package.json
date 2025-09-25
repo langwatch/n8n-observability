@@ -1,0 +1,45 @@
+{
+  "name": "@langwatch/n8n-observability",
+  "version": "0.1.0-prerelease.1",
+  "description": "LangWatch + n8n OpenTelemetry bootstrap (TypeScript, modern, preloadable).",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.cjs",
+    "./hooks": "./dist/hooks.cjs"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "flat": "^6.0.1",
+    "langwatch": "^0.7.1"
+  },
+  "peerDependencies": {
+    "@opentelemetry/context-async-hooks": "^2.1.0",
+    "@opentelemetry/sdk-node": "^0.205.0"
+  },
+  "keywords": [
+    "n8n",
+    "opentelemetry",
+    "langwatch",
+    "observability",
+    "otel"
+  ],
+  "devDependencies": {
+    "n8n-core": "^1.112.1",
+    "n8n-workflow": "^1.110.0"
+  }
+}
