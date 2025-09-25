@@ -13,10 +13,10 @@ const hooks = {
     ready: [
       async function (_app: unknown) {
         try {
-          const serviceName = process.env.LW_SERVICE_NAME || process.env.OTEL_SERVICE_NAME || "n8n";
+          const serviceName = process.env.N8N_OTEL_SERVICE_NAME || process.env.OTEL_SERVICE_NAME || "n8n";
           setupObservability({
             serviceName,
-            debug: process.env.LW_DEBUG ? { consoleLogging: true, logLevel: "info" } : undefined,
+            debug: process.env.N8N_OTEL_DEBUG ? { consoleLogging: true, logLevel: "info" } : undefined,
           });
         } catch (err) {
           console.warn("[@langwatch/n8n-observability] setupObservability failed:", (err as Error)?.message || err);
@@ -33,4 +33,4 @@ const hooks = {
   },
 };
 
-export default hooks;
+export = hooks;

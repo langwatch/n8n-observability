@@ -25,9 +25,7 @@
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
     "flat": "^6.0.1",
-    "langwatch": "^0.7.1"
-  },
-  "peerDependencies": {
+    "langwatch": "^0.7.1",
     "@opentelemetry/context-async-hooks": "^2.1.0",
     "@opentelemetry/sdk-node": "^0.205.0"
   },

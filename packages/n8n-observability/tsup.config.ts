@@ -3,11 +3,11 @@ import { defineConfig } from 'tsup';
 export default defineConfig([
   // Backend hooks file (CommonJS for EXTERNAL_HOOK_FILES compatibility)
   {
-    entry: { hooks: 'src/hooks.ts' },
+    entry: { index: 'src/index.ts', hooks: 'src/hooks.ts' },
     format: ['cjs'],
     platform: 'node',
-    target: 'node18',
-    clean: false,
+    target: 'node20',
+    clean: true,
     sourcemap: true,
     dts: false,
     splitting: false,
@@ -18,8 +18,6 @@ export default defineConfig([
     external: [
       'n8n-core',
       'n8n-workflow',
-      // '@opentelemetry/*',
-      // 'langwatch/*',
       '*.node'
     ],
   },
