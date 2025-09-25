@@ -33,4 +33,16 @@ const hooks = {
   },
 };
 
+// Eager init in case hooks are loaded but ready hook is not triggered (e.g., n8n execute)
+try {
+  const serviceName = process.env.N8N_OTEL_SERVICE_NAME || process.env.OTEL_SERVICE_NAME || "n8n";
+  setupObservability({
+    serviceName,
+    debug: process.env.N8N_OTEL_DEBUG ? { consoleLogging: true, logLevel: "info" } : undefined,
+  });
+  // Fire-and-forget; patch attempts multiple resolution strategies
+  void applyPatches();
+} catch {}
+
+// @ts-expect-error - CommonJS export
 export = hooks;

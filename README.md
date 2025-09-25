@@ -29,7 +29,7 @@ USER node
 docker build -t my-n8n-langwatch .
 docker run -p 5678:5678 \
   -e LANGWATCH_API_KEY=your_api_key \
-  -e LW_SERVICE_NAME=my-n8n \
+  -e N8N_OTEL_SERVICE_NAME=my-n8n \
   my-n8n-langwatch
 ```
 
@@ -43,7 +43,7 @@ services:
     image: n8nio/n8n:latest
     environment:
       - LANGWATCH_API_KEY=${LANGWATCH_API_KEY}
-      - LW_SERVICE_NAME=my-n8n
+      - N8N_OTEL_SERVICE_NAME=my-n8n
       - EXTERNAL_HOOK_FILES=/data/langwatch-hooks.cjs
     volumes:
       - ./node_modules/@langwatch/n8n-observability/dist/hooks.cjs:/data/langwatch-hooks.cjs:ro
@@ -60,11 +60,11 @@ volumes:
 
 ### C) Bare metal / npm terminal
 ```bash
-# install globally OR locally (ensure n8n resolves it)
+# install globally OR locally
 npm install -g @langwatch/n8n-observability
 
 export LANGWATCH_API_KEY=your_api_key
-export LW_SERVICE_NAME=my-n8n
+export N8N_OTEL_SERVICE_NAME=my-n8n
 export EXTERNAL_HOOK_FILES=$(node -e "console.log(require.resolve('@langwatch/n8n-observability/hooks'))")
 
 n8n start
@@ -78,7 +78,7 @@ n8n start
 import { setupN8nObservability } from '@langwatch/n8n-observability';
 
 await setupN8nObservability({
-  serviceName: process.env.LW_SERVICE_NAME ?? 'n8n',
+  serviceName: process.env.N8N_OTEL_SERVICE_NAME ?? 'n8n',
   debug: process.env.N8N_OTEL_DEBUG === '1',
 });
 

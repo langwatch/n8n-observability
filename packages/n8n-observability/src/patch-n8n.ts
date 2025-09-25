@@ -2,7 +2,7 @@ import { createRequire } from "module";
 import fs from "fs";
 import path from "path";
 import { getLangWatchTracer } from "langwatch";
-import { SemConvAttributes } from "langwatch/observability";
+import { SemConvAttributes, SpanType, spanTypes } from "langwatch/observability";
 import {
   AttributeValue,
   SpanStatusCode,
@@ -394,16 +394,23 @@ function patchWorkflowExecute(core: unknown): boolean {
       );
 
       return tracer.withActiveSpan(
-        `n8n.workflow.execute (${name})`,
+        `${workflow?.name ?? "Unnamed workflow"}`,
         {
           attributes: {
             "n8n.workflow.id": workflow?.id ?? "",
             "n8n.workflow.name": workflow?.name ?? "",
+            "langwatch.span.type": "workflow" satisfies SpanType,
           },
         },
         async (span) => {
           debug(`[PATCH] Created workflow span: ${name || "unknown"}`);
           try {
+            // Attempt to capture chat trigger from the WorkflowExecute instance
+            const selfChat = extractChatMessagesFromObject(self);
+            if (Array.isArray(selfChat) && selfChat.length > 0) {
+              span.setInput("chat_messages", selfChat);
+            }
+
             const res: unknown = await current.apply(this, args);
             const err = (
               res as { data?: { resultData?: { error?: unknown } } } | undefined
@@ -467,8 +474,18 @@ function patchWorkflowExecute(core: unknown): boolean {
         attributes[`n8n.node.${key}`] = toAttrValue(value);
       }
 
+      // LangWatch + OpenTelemetry GenAI semantic attributes (pre-execution)
+      const spanType = classifySpanType(nodeType, nodeName);
+      if (spanType) attributes["langwatch.span.type"] = spanType;
+      if (spanType === "llm") attributes["langwatch.streaming"] = false;
+
+      const preModel = findModelInInputs(executionData);
+      if (preModel?.system) attributes["gen_ai.system"] = preModel.system;
+      if (preModel?.model) attributes["gen_ai.request.model"] = preModel.model;
+
+      const spanName = nodeName && nodeName.length > 0 ? nodeName : `n8n.node.execute (${name})`;
       return tracer.startActiveSpan(
-        `n8n.node.execute (${name})`,
+        spanName,
         { attributes },
         async (span) => {
           try {
@@ -481,24 +498,89 @@ function patchWorkflowExecute(core: unknown): boolean {
               const outRaw = (result as { data?: unknown[] } | undefined)
                 ?.data?.[runIndex];
               if (Array.isArray(outRaw)) {
-                const finalJson = (
-                  outRaw as Array<INodeExecutionData | undefined>
-                ).map((item) => item?.json);
+                let chatOutputSet = false;
+                if (classifySpanType(nodeType, nodeName) === "llm") {
+                  const assistantText = extractAssistantTextFromOutRaw(outRaw as Array<INodeExecutionData | undefined>);
+                  if (assistantText && typeof assistantText === "string") {
+                    const chat = [{ role: "assistant", content: assistantText }];
+                    span.setOutput("chat_messages", chat);
+                    chatOutputSet = true;
+                  }
+                }
 
-                const s = safeJSON(finalJson);
-                if (s) span.setOutput(s);
+                if (!chatOutputSet) {
+                  const finalJson = (
+                    outRaw as Array<INodeExecutionData | undefined>
+                  ).map((item) => item?.json);
+                  const s = safeJSON(finalJson);
+                  if (s) span.setOutput(s);
+                }
+
+                // Post-execution enrichment: map prompt/evaluation info and model from outputs
+                const firstJson = (outRaw as Array<INodeExecutionData | undefined>)[0]?.json as
+                  | Record<string, unknown>
+                  | undefined;
+
+                if (firstJson && typeof firstJson === "object") {
+                  const compiled =
+                    (firstJson["compiledPrompt"] as Record<string, unknown> | undefined) ??
+                    (firstJson["prompt"] as Record<string, unknown> | undefined);
+
+                  const extraAttrs: SemConvAttributes = {};
+
+                  if (compiled && typeof compiled === "object") {
+                    Object.assign(
+                      extraAttrs,
+                      extractPromptAttributesFromCompiled(compiled)
+                    );
+                    const pm = parseModelString(
+                      (compiled as Record<string, unknown>)["model"]
+                    );
+                    if (pm.system) extraAttrs["gen_ai.system"] = pm.system;
+                    if (pm.model) extraAttrs["gen_ai.request.model"] = pm.model;
+                  }
+
+                  if (classifySpanType(nodeType, nodeName) === "evaluation") {
+                    const p = (node as { parameters?: Record<string, unknown> })
+                      ?.parameters;
+                    if (p) {
+                      extraAttrs["langwatch.evaluation.custom"] = toAttrValue({
+                        datasetSlug: p["datasetSlug"],
+                        evaluatorId: p["evaluatorId"],
+                        name: p["name"],
+                        asGuardrail: p["asGuardrail"],
+                        format: p["format"],
+                      });
+                    }
+                  }
+
+                  if (Object.keys(extraAttrs).length) {
+                    span.setAttributes(extraAttrs);
+                  }
+                }
               }
             }
 
             if (process.env.N8N_OTEL_CAPTURE_INPUT !== "false") {
               const main0 = executionData?.data?.main?.[0];
               if (Array.isArray(main0)) {
-                const inputData = (
-                  main0 as Array<INodeExecutionData | undefined>
-                ).map((d) => d?.json);
+                let chatInputSet = false;
+                if (classifySpanType(nodeType, nodeName) === "llm") {
+                  const chatMessages = extractChatMessagesFromInputs(main0 as Array<INodeExecutionData | undefined>);
+                  if (Array.isArray(chatMessages) && chatMessages.length > 0) {
+                    span.setInput("chat_messages", chatMessages);
+                    chatInputSet = true;
+                  }
+                }
 
-                const si = safeJSON(inputData);
-                if (si) span.setInput(si);
+                if (!chatInputSet) {
+                  const inputData = (
+                    main0 as Array<INodeExecutionData | undefined>
+                  ).map((d) => d?.json);
+
+                  const si = safeJSON(inputData);
+                  if (si) span.setInput(si);
+                }
               }
             }
 
@@ -605,4 +687,172 @@ function errorMessage(err: unknown): string {
 
 function isFunction(value: unknown): value is AnyFunction {
   return typeof value === "function";
+}
+
+// --- Helpers for LangWatch + GenAI semantic conventions ---
+type ChatMessage = { role: "system" | "user" | "assistant" | string; content: string };
+
+function extractAssistantTextFromOutRaw(
+  outRaw: Array<INodeExecutionData | undefined>
+): string | undefined {
+  for (const item of outRaw) {
+    const json = item?.json as Record<string, unknown> | undefined;
+    if (!json) continue;
+    // Common shapes in n8n LangChain LLM node output
+    const text =
+      (json["text"] as string | undefined) ||
+      (json["output_text"] as string | undefined) ||
+      (json["response"] as string | undefined) ||
+      (json["content"] as string | undefined);
+    if (typeof text === "string" && text.length > 0) return text;
+  }
+}
+
+// Recursively find chat trigger shape on any object (e.g., on WorkflowExecute instance)
+function extractChatMessagesFromObject(obj: unknown): ChatMessage[] | undefined {
+  if (!obj || typeof obj !== "object") return;
+
+  const visited = new WeakSet<object>();
+  const dfs = (o: unknown): ChatMessage[] | undefined => {
+    if (!o || typeof o !== "object") return;
+    const ro = o as Record<string, unknown>;
+    if (visited.has(ro as object)) return;
+    visited.add(ro as object);
+
+    // Direct shape
+    const sessionId = ro["sessionId"];
+    const action = ro["action"];
+    const chatInput = ro["chatInput"];
+    if (
+      typeof sessionId === "string" &&
+      typeof action === "string" &&
+      typeof chatInput === "string" &&
+      action.toLowerCase() === "sendmessage"
+    ) {
+      return [{ role: "user", content: chatInput }];
+    }
+
+    // Arrays inside
+    const arrayLike = ro["json"] ?? ro["payload"] ?? ro["data"] ?? ro["body"] ?? ro["items"];
+    if (Array.isArray(arrayLike)) {
+      for (const item of arrayLike) {
+        const res = dfs(item);
+        if (res?.length) return res;
+      }
+    }
+
+    // Explore nested objects.
+    for (const v of Object.values(ro)) {
+      const res = dfs(v);
+      if (res?.length) return res;
+    }
+  };
+
+  return dfs(obj);
+}
+
+function extractChatMessagesFromInputs(
+  main0: Array<INodeExecutionData | undefined>
+): ChatMessage[] | undefined {
+  // Try to locate compiledPrompt.messages or prompt.messages
+  for (const item of main0) {
+    const json = item?.json as Record<string, unknown> | undefined;
+    if (!json) continue;
+    const compiled = json["compiledPrompt"] as Record<string, unknown> | undefined;
+    const prompt = json["prompt"] as Record<string, unknown> | undefined;
+    const messages =
+      (compiled?.["messages"] as Array<Record<string, unknown>> | undefined) ||
+      (prompt?.["messages"] as Array<Record<string, unknown>> | undefined);
+    if (Array.isArray(messages) && messages.length > 0) {
+      const chat: ChatMessage[] = [];
+      for (const m of messages) {
+        const role = (m?.["role"] as string | undefined) ?? "user";
+        const content = m?.["content"] as string | undefined;
+        if (typeof content === "string" && content.length > 0) {
+          chat.push({ role, content });
+        }
+      }
+      if (chat.length > 0) return chat;
+    }
+  }
+  // Fallback: look for a single user input string under common keys
+  for (const item of main0) {
+    const json = item?.json as Record<string, unknown> | undefined;
+    if (!json) continue;
+    const flat = flatten(json, { delimiter: "." }) as Record<string, unknown>;
+    const userText =
+      (flat["compiledPrompt.messages.1.content"] as string | undefined) ||
+      (flat["prompt.messages.1.content"] as string | undefined) ||
+      (flat["input"] as string | undefined) ||
+      (flat["messages.1.content"] as string | undefined) ||
+      (flat["request.messages.1.content"] as string | undefined) ||
+      (flat["chatInput"] as string | undefined) ||
+      (flat["query"] as string | undefined);
+    if (typeof userText === "string" && userText.length > 0) {
+      return [{ role: "user", content: userText }];
+    }
+  }
+}
+function classifySpanType(
+  nodeType?: string,
+  nodeName?: string
+): "llm" | "prompt" | "evaluation" | undefined {
+  const t = (nodeType || "").toLowerCase();
+  const n = (nodeName || "").toLowerCase();
+
+  if (t.includes("langwatchprompt") || n.includes("langwatch_prompt_retrieval"))
+    return "prompt";
+  if (t.includes("langwatchevaluation")) return "evaluation";
+  if (t.includes("langchain") || t.includes("openai") || n.includes("llm"))
+    return "llm";
+
+  return void 0;
+}
+
+function parseModelString(model: unknown): { system?: string; model?: string } {
+  if (typeof model !== "string" || !model) return {};
+  const [system, rest] = model.split("/", 2);
+  return rest ? { system, model: rest } : { model: system };
+}
+
+function findModelInInputs(
+  executionData?: IExecuteData
+): { system?: string; model?: string } | undefined {
+  const main0 = executionData?.data?.main?.[0];
+  if (!Array.isArray(main0)) return;
+
+  for (const item of main0 as Array<INodeExecutionData | undefined>) {
+    const json = item?.json as Record<string, unknown> | undefined;
+    if (!json) continue;
+
+    const flat = flatten(json, { delimiter: "." }) as Record<string, unknown>;
+    const candidate =
+      flat["compiledPrompt.model"] ??
+      flat["prompt.model"] ??
+      flat["model"] ??
+      flat["request.model"];
+    const parsed = parseModelString(candidate);
+    if (parsed.system || parsed.model) return parsed;
+  }
+}
+
+function extractPromptAttributesFromCompiled(
+  compiledOrPrompt: Record<string, unknown>
+): SemConvAttributes {
+  const out: SemConvAttributes = {};
+  const id = compiledOrPrompt?.["id"];
+  const handle = compiledOrPrompt?.["handle"];
+  const version = compiledOrPrompt?.["version"];
+  const versionId = compiledOrPrompt?.["versionId"];
+
+  if (typeof id === "string") out["langwatch.prompt.id"] = id;
+  if (typeof handle === "string") out["langwatch.prompt.handle"] = handle;
+
+  if (typeof version === "number") out["langwatch.prompt.version.number"] = version;
+  else if (typeof version === "string" && !Number.isNaN(Number(version)))
+    out["langwatch.prompt.version.number"] = Number(version);
+
+  if (typeof versionId === "string") out["langwatch.prompt.version.id"] = versionId;
+
+  return out;
 }
