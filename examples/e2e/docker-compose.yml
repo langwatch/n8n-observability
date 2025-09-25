@@ -1,0 +1,12 @@
+services:
+  n8n-e2e:
+    image: n8nio/n8n:latest
+    environment:
+      LANGWATCH_API_KEY: "test_fake_key_123"
+      N8N_OTEL_SERVICE_NAME: "n8n-e2e"
+      EXTERNAL_HOOK_FILES: "/tmp/node_modules/@langwatch/n8n-observability/dist/hooks.cjs"
+      N8N_OTEL_DEBUG: "1"
+      LW_DEBUG: "1"
+    entrypoint: ["/bin/sh","-lc","sh /workspace/examples/e2e/entrypoint.sh"]
+    volumes:
+      - ../..:/workspace:ro
