@@ -11,17 +11,12 @@
     "build": "pnpm -r build",
     "dev": "pnpm -r dev",
     "test": "echo 'no tests yet'",
-    "lint": "eslint . --ext .ts,.js,.mjs",
+    "typecheck": "pnpm -r typecheck",
     "format": "prettier -w .",
     "e2e": "node tests/e2e/run.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.19.17",
-    "@typescript-eslint/eslint-plugin": "^8.44.1",
-    "@typescript-eslint/parser": "^8.44.1",
-    "eslint": "^9.0.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-import": "^2.32.0",
     "n8n-core": "^1.112.1",
     "n8n-workflow": "^1.110.0",
     "prettier": "^3.6.2",

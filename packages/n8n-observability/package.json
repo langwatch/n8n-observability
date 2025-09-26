@@ -1,6 +1,6 @@
 {
   "name": "@langwatch/n8n-observability",
-  "version": "0.1.0-prerelease.1",
+  "version": "1.0.0-prerelease.1",
   "description": "LangWatch + n8n OpenTelemetry bootstrap (TypeScript, modern, preloadable).",
   "license": "MIT",
   "main": "dist/index.js",
@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
   "files": [

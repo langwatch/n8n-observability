@@ -1,4 +1,4 @@
-# LangWatch n8n Observability
+# @langwatch/n8n-observability
 
 Observability for [n8n](https://n8n.io) powered by [LangWatch](https://langwatch.ai).  
 Instruments workflows and nodes via OpenTelemetry and sends spans to LangWatch.
