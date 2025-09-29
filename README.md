@@ -3,6 +3,8 @@
 Observability for [n8n](https://n8n.io) powered by [LangWatch](https://langwatch.ai).  
 Instruments workflows and nodes via OpenTelemetry and sends spans to LangWatch.
 
+![Observability Setup](./assets/observability.webp)
+
 > [!TIP]
 > **Complete LangWatch Integration**: You can pair this with the [LangWatch n8n nodes](https://github.com/langwatch/n8n-nodes-langwatch) to get a complete LangWatch integration, including Prompt Management, Evaluation, Datasets, and more.
 
