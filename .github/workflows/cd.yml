@@ -1,0 +1,48 @@
+name: cd
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+jobs:
+  publish-npm:
+    if: startsWith(github.event.release.tag_name, 'n8n-observability/') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10.12.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: "pnpm-lock.yaml"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run type check
+        run: pnpm run typecheck
+
+      - name: Run tests
+        run: pnpm run e2e
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Publish to npm
+        working-directory: packages/n8n-observability
+        run: pnpm publish --provenance --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
