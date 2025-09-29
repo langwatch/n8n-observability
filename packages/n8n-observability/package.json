@@ -37,6 +37,10 @@
     "observability",
     "otel"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/langwatch/n8n-observability"
+  },
   "devDependencies": {
     "n8n-core": "^1.112.1",
     "n8n-workflow": "^1.110.0"
